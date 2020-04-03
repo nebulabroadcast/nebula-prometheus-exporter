@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import json
 import subprocess
 import psutil
 import socket
@@ -37,10 +38,16 @@ settings = {
     "prefix" : "nebula",
     "port" : 8080,
     "tags" : {},
-    "host" : HOSTNAME,
+    "host" : "",
     "version" : VERSION,
     "smi_path" : None,
 }
+
+try:
+    with open("settings.json") as f:
+        settings.update(json.load(f))
+except:
+    pass
 
 
 
@@ -78,7 +85,7 @@ def get_gpu_stats():
             key, value = line.strip().split(":")
             key = key.strip()
             value = float(value.strip().split(" ")[0])
-            gpu_stats.append([current_mode, key, value])
+            gpu_stats.append([current_mode.lower(), key.lower(), value])
 
     if gpu_id:
         result[gpu_id] = gpu_stats
@@ -123,21 +130,19 @@ class HWMetrics():
             self.last_update = time.time()
 
         result = ""
-        result += render_metric("uptime", time.time() - BOOT_TIME)
+        result += render_metric("uptime_seconds", time.time() - BOOT_TIME)
         result += render_metric("cpu_usage", self.cpu)
-        result += render_metric("memory_total", self.mem.total)
-        result += render_metric("memory_free", self.mem.available)
+        result += render_metric("memory_bytes_total", self.mem.total)
+        result += render_metric("memory_bytes_free", self.mem.available)
         result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
 
         for gpuid in self.gpu:
-            for g in self.gpu[gpuid]:
-                #result += render_metric("gpudd")
-                result += "{}_gpu{{hostname=\"{}\", gpu_id=\"{}\", mode=\"{}\", key=\"{}\"}} {}\n".format(
-                        settings["prefix"],
-                        self.hostname,
-                        gpuid,
-                        g[0], g[1], g[2]
-                    )
+            for mode, key, value in self.gpu[gpuid]:
+                if mode != "utilization":
+                    continue
+                if key == "gpu":
+                    key = "usage"
+                result += render_metric("gpu_{}".format(key.lower()), value, gpu_id=gpuid)
         return result
 
 
@@ -177,8 +182,8 @@ class Server():
         self.httpd = HTTPServer((settings["host"], settings["port"]), RequestHandler)
         self.httpd.parent = self
         self.httpd.should_run = True
-        print (self.get_info)
         thread.start_new_thread(self.httpd.serve_forever, ())
+        print (self.get_info)
 
     @property
     def get_info(self):
@@ -197,10 +202,9 @@ if __name__ == '__main__':
 
     for f in smi_paths:
         if os.path.exists(f):
-            settings["smi_paths"] = f
+            settings["smi_path"] = f
             break
     else:
-        print("Unable to find nvidia-smi. GPU metrics will not be available")
         settings["smi_path"] = None
 
     server = Server()
