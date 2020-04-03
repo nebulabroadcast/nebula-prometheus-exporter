@@ -11,25 +11,35 @@ import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import _thread as thread
 
-VERSION = 0.1
+VERSION = 0.2
 BANNER = """
 
-Nebula Broadcast Prometheus exporter v{}
+Nebula Broadcast Prometheus exporter v{version}
 https://nebulabroadcast.com
 
 This is an alpha release. Please report issues to
 https://github.com/nebulabroadcast/nebula-prometheus-exporter/issues
 
-""".format(VERSION)
+Listening on {host}:{port}
 
+    - use /metrics for metrics
+    - use /shutdown for shutdown (service, not machine)
+
+"""
+
+HOSTNAME = socket.gethostname()
+BOOT_TIME = psutil.boot_time()
+RUN_TIME = time.time()
 
 settings = {
     "caspar_host" : "localhost",
     "caspar_port" : 5250,
     "prefix" : "nebula",
-    "host" : "",
     "port" : 8080,
-    "smi_path" : "c:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
+    "tags" : {},
+    "host" : HOSTNAME,
+    "version" : VERSION,
+    "smi_path" : None,
 }
 
 
@@ -78,6 +88,18 @@ def get_gpu_stats():
 
 
 
+def render_metric(name, value, **tags):
+    result = ""
+    if settings.get("prefix"):
+        result+=str(settings["prefix"])+"_"
+    tags["hostname"] = HOSTNAME
+    tags.update(settings["tags"])
+    result += name + "{"
+    result += ", ".join(["{}=\"{}\"".format(k, tags[k]) for k in tags ])
+    result += "}"
+    result += " " + str(value) + "\n"
+    return result
+
 
 
 
@@ -87,7 +109,6 @@ class HWMetrics():
         self.swp = None
         self.cpu = None
         self.gpu = None
-        self.hostname = socket.gethostname()
         self.last_update = 0
 
     def update(self):
@@ -102,19 +123,15 @@ class HWMetrics():
             self.last_update = time.time()
 
         result = ""
-        result += "{}_uptime{{hostname=\"{}\"}} {}\n".format(settings["prefix"], self.hostname, time.time() - psutil.boot_time())
-        result += "{}_cpu{{hostname=\"{}\"}} {}\n".format(settings["prefix"], self.hostname, self.cpu)
-
-        result += "{}_mem{{hostname=\"{}\", mode=\"total\"}} {}\n".format(settings["prefix"], self.hostname, self.mem.total)
-        result += "{}_mem{{hostname=\"{}\", mode=\"free\"}} {}\n".format(settings["prefix"], self.hostname, self.mem.available)
-        result += "{}_mem{{hostname=\"{}\", mode=\"usage\"}} {}\n".format(
-                settings["prefix"],
-                self.hostname,
-                100*((self.mem.total-self.mem.available)/self.mem.total)
-            )
+        result += render_metric("uptime", time.time() - BOOT_TIME)
+        result += render_metric("cpu_usage", self.cpu)
+        result += render_metric("memory_total", self.mem.total)
+        result += render_metric("memory_free", self.mem.available)
+        result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
 
         for gpuid in self.gpu:
             for g in self.gpu[gpuid]:
+                #result += render_metric("gpudd")
                 result += "{}_gpu{{hostname=\"{}\", gpu_id=\"{}\", mode=\"{}\", key=\"{}\"}} {}\n".format(
                         settings["prefix"],
                         self.hostname,
@@ -165,17 +182,24 @@ class Server():
 
     @property
     def get_info(self):
-        return BANNER + """
-Listening on {host}:{port}
-
-    - use /metrics for metrics
-    - use /shutdown for shutdown (service, not machine)
-        """.format(**settings)
+        return BANNER.format(**settings)
 
 
 if __name__ == '__main__':
+    smi_paths = [
+            "c:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
+            "/usr/bin/nvidia-smi",
+            "/usr/local/bin/nvidia-smi"
+        ]
 
-    if not os.path.exists(settings["smi_path"]):
+    if settings.get("smi_path"):
+        smi_paths.insert(0, settings["smi_path"])
+
+    for f in smi_paths:
+        if os.path.exists(f):
+            settings["smi_paths"] = f
+            break
+    else:
         print("Unable to find nvidia-smi. GPU metrics will not be available")
         settings["smi_path"] = None
 
