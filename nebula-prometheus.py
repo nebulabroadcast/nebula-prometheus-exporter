@@ -52,46 +52,53 @@ except:
 
 
 
-def get_gpu_stats():
-    if not settings["smi_path"]:
+def get_gpu_stats(smi_path, request_modes=["utilization"]):
+    try:
+        rawdata = subprocess.check_output([smi_path, "-q", "-d", "utilization"])
+    except Exception:
+        log_traceback()
         return {}
-    rawdata = subprocess.check_output([settings["smi_path"], "-q", "-d", "utilization"]).decode("utf-8")
+
+    rawdata = rawdata.decode("utf-8")
 
     modes = [
-            "Utilization",
-            "GPU Utilization Samples",
-            "Memory Utilization Samples",
-            "ENC Utilization Samples",
-            "DEC Utilization Samples",
+            ["Utilization",  "utilization"],
+            ["GPU Utilization Samples", "gpu-samples"],
+            ["Memory Utilization Samples", "mem-samples"],
+            ["ENC Utilization Samples", "enc-samples"],
+            ["DEC Utilization Samples", "dec-samples"],
         ]
-    result = {}
-    gpu_id = False
+    result = []
+    gpu_id = -1
     current_mode = False
     gpu_stats = {}
     for line in rawdata.split("\n"):
         if line.startswith("GPU"):
-            if gpu_id:
-                result[gpu_id] = gpu_stats
+            if gpu_id > -1:
+                result.append(gpu_stats)
 
-            gpu_stats = []
-            gpu_id = line.split(" ")[1].strip()
-
-        for m in modes:
+            gpu_stats = {"id" : line.split(" ")[1].strip()}
+            gpu_id += 1
+        for m, mslug in modes:
             if line.startswith((" "*4) + m):
-                current_mode = m
+                current_mode = mslug
                 break
 
-        if current_mode and line.startswith(" "*8):
+        if current_mode in request_modes and line.startswith(" "*8):
             key, value = line.strip().split(":")
             key = key.strip()
-            value = float(value.strip().split(" ")[0])
-            gpu_stats.append([current_mode.lower(), key.lower(), value])
+            try:
+                value = float(value.strip().split(" ")[0])
+            except:
+                value = 0
+            if current_mode not in gpu_stats:
+                gpu_stats[current_mode] = {}
+            gpu_stats[current_mode][key.lower()] =  value
 
-    if gpu_id:
-        result[gpu_id] = gpu_stats
+    if gpu_id > -1:
+        result.append(gpu_stats)
 
     return result
-
 
 
 
@@ -122,7 +129,7 @@ class HWMetrics():
         self.mem = psutil.virtual_memory()
         self.swp = psutil.swap_memory()
         self.cpu = psutil.cpu_percent()
-        self.gpu = get_gpu_stats()
+        self.gpu = get_gpu_stats(settings["smi_path"])
 
     def __call__(self):
         if time.time() - self.last_update > 2:
@@ -136,13 +143,13 @@ class HWMetrics():
         result += render_metric("memory_bytes_free", self.mem.available)
         result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
 
-        for gpuid in self.gpu:
-            for mode, key, value in self.gpu[gpuid]:
-                if mode != "utilization":
-                    continue
+        for i, gpu in enumerate(self.gpu):
+            metrics = gpu["utilization"]
+            for key in metrics:
+                value = metrics[key]
                 if key == "gpu":
                     key = "usage"
-                result += render_metric("gpu_{}".format(key.lower()), value, gpu_id=gpuid)
+                result += render_metric("gpu_{}".format(key), value, gpu_id=i)
         return result
 
 
