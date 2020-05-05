@@ -36,7 +36,7 @@ settings = {
     "caspar_host" : "localhost",
     "caspar_port" : 5250,
     "prefix" : "nebula",
-    "port" : 8080,
+    "port" : 9731,
     "tags" : {},
     "host" : "",
     "version" : VERSION,
