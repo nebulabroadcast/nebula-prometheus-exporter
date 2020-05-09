@@ -12,36 +12,12 @@ import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import _thread as thread
 
-VERSION = 0.2
-BANNER = """
-
-Nebula Broadcast Prometheus exporter v{version}
-https://nebulabroadcast.com
-
-This is an alpha release. Please report issues to
-https://github.com/nebulabroadcast/nebula-prometheus-exporter/issues
-
-Listening on {host}:{port}
-
-    - use /metrics for metrics
-    - use /shutdown for shutdown (service, not machine)
-
-"""
+from defaults import settings, VERSION, BANNER
 
 HOSTNAME = socket.gethostname()
 BOOT_TIME = psutil.boot_time()
 RUN_TIME = time.time()
-
-settings = {
-    "caspar_host" : "localhost",
-    "caspar_port" : 5250,
-    "prefix" : "nebula",
-    "port" : 9731,
-    "tags" : {},
-    "host" : "",
-    "version" : VERSION,
-    "smi_path" : None,
-}
+PLATFORM = "windows" if sys.platform == "win32" else "unix"
 
 try:
     with open("settings.json") as f:
@@ -49,14 +25,12 @@ try:
 except:
     pass
 
-
-
-
 def get_gpu_stats(smi_path, request_modes=["utilization"]):
+    if not smi_path:
+        return {}
     try:
         rawdata = subprocess.check_output([smi_path, "-q", "-d", "utilization"])
     except Exception:
-        log_traceback()
         return {}
 
     rawdata = rawdata.decode("utf-8")
@@ -102,6 +76,36 @@ def get_gpu_stats(smi_path, request_modes=["utilization"]):
 
 
 
+
+def get_disks():
+    result = []
+    for disk in psutil.disk_partitions(all=True):
+        for m in ["/run", "/proc", "/sys", "/dev", "/snap"]:
+            if disk.mountpoint.startswith(m):
+                break
+        else:
+            result.append({
+                    "device" : disk.device,
+                    "mountpoint" : disk.mountpoint,
+                    "fstype" : disk.fstype,
+                })
+    return result
+
+
+available_disks = get_disks()
+
+
+def get_disk_usage():
+    for disk in available_disks:
+        usage = psutil.disk_usage(disk["mountpoint"])
+        disk.update({
+                "total" : usage.total,
+                "free" : usage.free,
+                "usage" : usage.percent
+            })
+        yield disk
+
+
 def render_metric(name, value, **tags):
     result = ""
     if settings.get("prefix"):
@@ -113,6 +117,7 @@ def render_metric(name, value, **tags):
     result += "}"
     result += " " + str(value) + "\n"
     return result
+
 
 
 
@@ -142,6 +147,17 @@ class HWMetrics():
         result += render_metric("memory_bytes_total", self.mem.total)
         result += render_metric("memory_bytes_free", self.mem.available)
         result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
+
+        if settings["disk_usage"]:
+            for disk in get_disk_usage():
+                tags = {
+                        "mountpoint" : disk["mountpoint"].replace("\\", "/"),
+                        "fstype" : disk["fstype"],
+                    }
+                result += render_metric("disk_bytes_total", disk["total"] , **tags)
+                result += render_metric("disk_bytes_free", disk["free"], **tags)
+                result += render_metric("disk_usage", disk["usage"], **tags)
+
 
         for i, gpu in enumerate(self.gpu):
             metrics = gpu["utilization"]
@@ -214,7 +230,18 @@ if __name__ == '__main__':
     else:
         settings["smi_path"] = None
 
+    if "--metrics" in sys.argv:
+        metrics = HWMetrics()
+        print(metrics())
+        sys.exit(0)
+
+
     server = Server()
     while server.httpd.should_run:
-        time.sleep(1)
+        try:
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print()
+            break
+
     print("Shutting down HTTP server")
