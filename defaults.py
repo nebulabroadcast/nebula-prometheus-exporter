@@ -1,8 +1,9 @@
 from version import *
 
 settings = {
-    "caspar_host" : "localhost",
-    "caspar_port" : 5250,
+    "caspar_host" : None,
+    "amcp_port" : 5250,
+    "osc_port" : 6250,
     "prefix" : "nebula",
     "port" : 9731,
     "tags" : {},

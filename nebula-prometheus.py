@@ -13,6 +13,15 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import _thread as thread
 
 from defaults import settings, VERSION, BANNER
+from gpu import get_gpu_stats
+from caspar import CCGTool
+
+from nxtools import *
+
+print ()
+print ()
+
+logging.show_time = True
 
 HOSTNAME = socket.gethostname()
 BOOT_TIME = psutil.boot_time()
@@ -25,74 +34,36 @@ try:
 except:
     pass
 
-def get_gpu_stats(smi_path, request_modes=["utilization"]):
-    if not smi_path:
-        return {}
-    try:
-        rawdata = subprocess.check_output([smi_path, "-q", "-d", "utilization"])
-    except Exception:
-        return {}
+#
+# Drive usage
+#
 
-    rawdata = rawdata.decode("utf-8")
-
-    modes = [
-            ["Utilization",  "utilization"],
-            ["GPU Utilization Samples", "gpu-samples"],
-            ["Memory Utilization Samples", "mem-samples"],
-            ["ENC Utilization Samples", "enc-samples"],
-            ["DEC Utilization Samples", "dec-samples"],
-        ]
-    result = []
-    gpu_id = -1
-    current_mode = False
-    gpu_stats = {}
-    for line in rawdata.split("\n"):
-        if line.startswith("GPU"):
-            if gpu_id > -1:
-                result.append(gpu_stats)
-
-            gpu_stats = {"id" : line.split(" ")[1].strip()}
-            gpu_id += 1
-        for m, mslug in modes:
-            if line.startswith((" "*4) + m):
-                current_mode = mslug
-                break
-
-        if current_mode in request_modes and line.startswith(" "*8):
-            key, value = line.strip().split(":")
-            key = key.strip()
-            try:
-                value = float(value.strip().split(" ")[0])
-            except:
-                value = 0
-            if current_mode not in gpu_stats:
-                gpu_stats[current_mode] = {}
-            gpu_stats[current_mode][key.lower()] =  value
-
-    if gpu_id > -1:
-        result.append(gpu_stats)
-
-    return result
-
-
+mountpoint_blacklist = ["/run", "/proc", "/sys", "/dev", "/snap", "/var/lib", "/tmp/snap"]
+mountpoint_whitelist = settings["disk_usage"] if type(settings["disk_usage"]) == list else []
 
 
 def get_disks():
+    if not settings["disk_usage"]:
+        return
     result = []
     for disk in psutil.disk_partitions(all=True):
-        for m in ["/run", "/proc", "/sys", "/dev", "/snap"]:
-            if disk.mountpoint.startswith(m):
-                break
-        else:
-            result.append({
-                    "device" : disk.device,
-                    "mountpoint" : disk.mountpoint,
-                    "fstype" : disk.fstype,
-                })
+        if not all([not disk.mountpoint.startswith(b) for b in mountpoint_blacklist]):
+            continue
+
+        if mountpoint_whitelist:
+            if not any([disk.mountpoint == b if b == "/" else disk.mountpoint.lower().startswith(b.lower()) for b in mountpoint_whitelist ]):
+                continue
+
+        result.append({
+                "device" : disk.device,
+                "mountpoint" : disk.mountpoint,
+                "fstype" : disk.fstype,
+            })
     return result
 
 
 available_disks = get_disks()
+
 
 
 def get_disk_usage():
@@ -105,6 +76,9 @@ def get_disk_usage():
             })
         yield disk
 
+#
+# Metrics
+#
 
 def render_metric(name, value, **tags):
     result = ""
@@ -148,15 +122,14 @@ class HWMetrics():
         result += render_metric("memory_bytes_free", self.mem.available)
         result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
 
-        if settings["disk_usage"]:
-            for disk in get_disk_usage():
-                tags = {
-                        "mountpoint" : disk["mountpoint"].replace("\\", "/"),
-                        "fstype" : disk["fstype"],
-                    }
-                result += render_metric("disk_bytes_total", disk["total"] , **tags)
-                result += render_metric("disk_bytes_free", disk["free"], **tags)
-                result += render_metric("disk_usage", disk["usage"], **tags)
+        for disk in get_disk_usage():
+            tags = {
+                    "mountpoint" : disk["mountpoint"].replace("\\", "/").rstrip("/"),
+                    "fstype" : disk["fstype"],
+                }
+            result += render_metric("disk_bytes_total", disk["total"] , **tags)
+            result += render_metric("disk_bytes_free", disk["free"], **tags)
+            result += render_metric("disk_usage", disk["usage"], **tags)
 
 
         for i, gpu in enumerate(self.gpu):
@@ -166,13 +139,43 @@ class HWMetrics():
                 if key == "gpu":
                     key = "usage"
                 result += render_metric("gpu_{}".format(key), value, gpu_id=i)
+
+        if ccgtool:
+            for id_channel in ccgtool.profiler:
+                for id_layer in ccgtool.profiler[id_channel]:
+                    value = ccgtool.profiler[id_channel][id_layer]
+                    tags = {
+                            "casparcg_host" : ccgtool.address,
+                            "casparcg_version" : ccgtool.protocol,
+                            "channel" : id_channel,
+                            "layer" : id_layer
+                        }
+                    result += render_metric("caspar_dropped_total", value, **tags)
+
+
         return result
 
 
 metrics = HWMetrics()
 
+if settings["caspar_host"]:
+    ccgtool = CCGTool(
+            settings["caspar_host"],
+            settings["amcp_port"],
+            osc_port=settings["osc_port"],
+            blocking=False
+        )
+    ccgtool.start(blocking=False)
+else:
+    ccgtool = None
+
+
 
 class RequestHandler(BaseHTTPRequestHandler):
+
+    def log_request(self, code):
+        logging.debug("HTTP request {} finished with status {}".format(self.path, code))
+
     def make_response(self, data, status=200, mime="text/txt"):
         if type(data) == str:
             data = data.encode("utf-8")
@@ -193,7 +196,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.make_response(m)
             return
         elif self.path.startswith("/shutdown"):
-            print("Shutdown requested")
+            logging.warning("Shutdown requested")
             self.server.should_run = False
             return
 
@@ -205,8 +208,8 @@ class Server():
         self.httpd = HTTPServer((settings["host"], settings["port"]), RequestHandler)
         self.httpd.parent = self
         self.httpd.should_run = True
+        logging.info("Starting HTTP server: {}:{}".format(settings["host"], settings["port"]))
         thread.start_new_thread(self.httpd.serve_forever, ())
-        print (self.get_info)
 
     @property
     def get_info(self):
@@ -225,6 +228,7 @@ if __name__ == '__main__':
 
     for f in smi_paths:
         if os.path.exists(f):
+            logging.info("nvidia-smi detected. GPU metrics will be available.")
             settings["smi_path"] = f
             break
     else:
@@ -244,4 +248,4 @@ if __name__ == '__main__':
             print()
             break
 
-    print("Shutting down HTTP server")
+    logging.info("Shutting down HTTP server")
