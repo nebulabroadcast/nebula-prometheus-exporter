@@ -12,10 +12,21 @@ from pythonosc import dispatcher
 from pythonosc import osc_server
 
 
-class CCGTool(object):
-    def __init__(self, address="localhost", port=5250, **kwargs):
-        self.address = address
-        self.port = port
+class CasparMetricsProvider(object):
+    def __init__(self, settings):
+        self.stage = {}
+        self.fps = {}
+        self.profiler = {}
+        self.peak_volume = {}
+
+        self.address = settings["caspar_host"]
+        self.port = settings["amcp_port"]
+        self.osc_address = "0.0.0.0"
+        self.osc_port = settings["osc_port"]
+
+        if not self.address:
+            return
+
         self.connect()
         response = self.query("VERSION")
         protocols = {
@@ -34,12 +45,7 @@ class CCGTool(object):
             self.protocol = 2.2
             logging.info("CasparCG: using default protocol 2.06")
 
-        self.stage = {}
-        self.fps = {}
-        self.profiler = {}
-
         i = 1
-
         mode_to_fps = {
                 "PAL" : (25, 1),
                 "NTSC" : (30000, 1001),
@@ -60,17 +66,13 @@ class CCGTool(object):
             self.fps[i] = fps
             i += 1
 
-        self.osc_address = kwargs.get("osc_address", "0.0.0.0")
-        self.osc_port = kwargs.get("osc_port", 6250)
+        self.start()
         logging.debug("CasparCG: initialization completed")
 
 
-    def start(self, blocking=False):
+    def start(self):
         _thread.start_new_thread(self.heartbeat, ())
-        if blocking:
-            self.main()
-        else:
-            _thread.start_new_thread(self.main, ())
+        _thread.start_new_thread(self.main, ())
 
 
     def connect(self):
@@ -123,11 +125,11 @@ class CCGTool(object):
             self.fps[id_channel] = data
 
     def parse_volume(self, *args):
-        # TODO: MASTER VOLUME
         address = args[0].split("/")
         id_channel = int(address[2])
-        data = args[1]
-        #TODO
+        if len(address) == 7 and address[6] == "pFS":
+            self.peak_volume[id_channel] = max(args[1], self.peak_volume.get(id_channel, 0))
+
 
     def parse_consume_time(self, *args):
         address = args[0].split("/")
@@ -163,6 +165,11 @@ class CCGTool(object):
                 logging.warning("CasparCG: drop frame detected on channel {} layer {}".format(id_channel, layer))
                 self.profiler[id_channel][layer] += 1
 
+
+    def get_peak_volume(self, id_channel):
+        result = self.peak_volume.get(id_channel, 0)
+        self.peak_volume[id_channel] = 0
+        return result
 
     def get_fps(self, id_channel):
         fps_n, fps_d = self.fps.get(id_channel, (25, 1))
@@ -214,9 +221,3 @@ class CCGTool(object):
                 "dur" : dur,
                 "live" : is_live
             }
-
-
-
-if __name__ == "__main__":
-    ct = CCGTool("192.168.4.23")
-    ct.start(blocking=True)
