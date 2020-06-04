@@ -2,7 +2,7 @@ import os
 import zipfile
 
 import importlib  
-mainmod = importlib.import_module("nebula-prometheus")
+mainmod = importlib.import_module("promexp.version")
 version = mainmod.VERSION
 
 
