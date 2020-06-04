@@ -37,6 +37,7 @@ class Metrics():
         self.swp = None
         self.cpu = None
         self.gpu = None
+        self.diskio = [0,0]
         self.last_update = 0
 
     def update(self):
@@ -44,6 +45,7 @@ class Metrics():
         self.swp = psutil.swap_memory()
         self.cpu = psutil.cpu_percent()
         self.gpu = self.gpu_provider()
+        self.diskio = psutil.disk_io_counters()
 
     def __call__(self):
         if time.time() - self.last_update > 2:
@@ -56,6 +58,12 @@ class Metrics():
         result += render_metric("memory_bytes_total", self.mem.total)
         result += render_metric("memory_bytes_free", self.mem.available)
         result += render_metric("memory_usage", 100*((self.mem.total-self.mem.available)/self.mem.total))
+        result += render_metric("disk_read_bytes", self.diskio.read_bytes)
+        result += render_metric("disk_write_bytes", self.diskio.write_bytes)
+
+        #
+        # Disk usage
+        #
 
         for disk in self.disk_provider():
             tags = {
@@ -66,6 +74,9 @@ class Metrics():
             result += render_metric("disk_bytes_free", disk["free"], **tags)
             result += render_metric("disk_usage", disk["usage"], **tags)
 
+        #
+        # NVIDIA GPU
+        #
 
         for i, gpu in enumerate(self.gpu):
             metrics = gpu["utilization"]
@@ -75,18 +86,28 @@ class Metrics():
                     key = "usage"
                 result += render_metric("gpu_{}".format(key), value, gpu_id=i)
 
-        for id_channel in self.caspar_provider.fps:
-            tags = {
-                    "casparcg_host" : self.caspar_provider.address,
-                    "casparcg_version" : self.caspar_provider.protocol,
-                    "channel" : id_channel,
-                }
-            result += render_metric("casparcg_peak_volume", self.caspar_provider.get_peak_volume(id_channel), **tags)
-            for id_layer in self.caspar_provider.profiler.get(id_channel, {}):
-                value = self.caspar_provider.profiler[id_channel][id_layer]
-                tags["layer"] = id_layer
-                result += render_metric("casparcg_dropped_total", value, **tags)
+        #
+        # CasparCG
+        #
 
+        if self.caspar_provider.address:
+            result += render_metric(
+                    "casparcg_idle_seconds",
+                    time.time() - self.caspar_provider.last_osc_ts,
+                    casparcg_host=self.caspar_provider.address,
+                    casparcg_version=self.caspar_provider.protocol,
+                )
 
+            for id_channel in self.caspar_provider.fps:
+                tags = {
+                        "casparcg_host" : self.caspar_provider.address,
+                        "casparcg_version" : self.caspar_provider.protocol,
+                        "channel" : id_channel,
+                    }
+                result += render_metric("casparcg_peak_volume", self.caspar_provider.get_peak_volume(id_channel), **tags)
+                for id_layer in self.caspar_provider.profiler.get(id_channel, {}):
+                    value = self.caspar_provider.profiler[id_channel][id_layer]
+                    tags["layer"] = id_layer
+                    result += render_metric("casparcg_dropped_total", value, **tags)
 
         return result

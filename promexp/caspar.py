@@ -23,6 +23,7 @@ class CasparMetricsProvider(object):
         self.port = settings["amcp_port"]
         self.osc_address = "0.0.0.0"
         self.osc_port = settings["osc_port"]
+        self.last_osc_ts = 0
 
         if not self.address:
             return
@@ -132,6 +133,7 @@ class CasparMetricsProvider(object):
 
 
     def parse_consume_time(self, *args):
+        self.last_osc_ts = time.time()
         address = args[0].split("/")
         id_channel = int(address[2])
         data = args[1]

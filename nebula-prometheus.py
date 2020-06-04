@@ -11,7 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import _thread as thread
 
 from nxtools import *
-from promexp import Metrics, settings
+from promexp import Metrics, settings, BANNER
 
 logging.show_time = True
 
@@ -65,7 +65,7 @@ class MetricsServer():
 
     @property
     def get_info(self):
-        return "banner is not implemented"
+        return BANNER.format(**settings)
 
 
 

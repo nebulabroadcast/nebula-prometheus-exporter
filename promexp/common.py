@@ -4,7 +4,7 @@ import socket
 import psutil
 
 from .version import *
-
+from .branding import BANNER, PREFIX
 
 HOSTNAME = socket.gethostname()
 BOOT_TIME = psutil.boot_time()
@@ -15,7 +15,7 @@ settings = {
     "caspar_host" : None,
     "amcp_port" : 5250,
     "osc_port" : 6250,
-    "prefix" : "nebula",
+    "prefix" : PREFIX,
     "port" : 9731,
     "tags" : {},
     "host" : "",
@@ -23,19 +23,3 @@ settings = {
     "smi_path" : None,
     "disk_usage" : True
 }
-
-
-BANNER = """
-
-Nebula Broadcast Prometheus exporter v{version}
-https://nebulabroadcast.com
-
-This is an alpha release. Please report issues to
-https://github.com/nebulabroadcast/nebula-prometheus-exporter/issues
-
-Listening on {host}:{port}
-
-    - use /metrics for metrics
-    - use /shutdown for shutdown (service, not machine)
-
-"""
