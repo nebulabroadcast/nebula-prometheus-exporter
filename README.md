@@ -5,6 +5,22 @@ Stand-alone service which provides system metrics for Prometheus in the same
 format as Nebula Server. It is intended to run on machines without Nebula
 (such as playout servers, encoders).
 
+Installation
+------------
+
+## Windows
+
+Download the latest binary package from releases page, edit `settings.json` file and run the executable.
+
+## Linux
+
+Nebula Prometheus Exporter depends on *psutil* Python module. Install it using `pip3 install psutil` command.
+
+ - Clone this repository
+ - Edit `settings.json` file
+ - Use `make install` to install nebula-prometheus-exporter systemd unit
+ - Run `systemctl enable nebula-prometheus-exporter`
+ - Run `systemctl start nebula-prometheus-exporter`
 
 Configuration
 -------------

@@ -1,0 +1,13 @@
+[Unit]
+Description=Nebula Prometheus exporter
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=WORKDIR
+ExecStart=WORKDIR/nebula-prometheus.py --daemon
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

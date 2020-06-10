@@ -71,6 +71,9 @@ class MetricsServer():
 
 
 if __name__ == '__main__':
+    if "--daemon" in sys.argv:
+        logging.file = os.devnull
+
     server = MetricsServer()
     while server.httpd.should_run:
         try:
