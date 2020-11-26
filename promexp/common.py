@@ -19,7 +19,9 @@ settings = {
     "port" : 9731,
     "tags" : {},
     "host" : "",
+    "hostname" : None,
     "version" : VERSION,
     "smi_path" : None,
-    "disk_usage" : True
+    "disk_usage" : True,
+    "network_usage" : True
 }

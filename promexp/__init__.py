@@ -5,6 +5,7 @@ from nxtools import *
 
 from .common import *
 from .disk import DiskMetricsProvider
+from .network import NetworkMetricsProvider
 from .gpu import GpuMetricsProvider
 from .caspar import CasparMetricsProvider
 
@@ -13,7 +14,7 @@ def render_metric(name, value, **tags):
     result = ""
     if settings.get("prefix"):
         result+=str(settings["prefix"])+"_"
-    tags["hostname"] = HOSTNAME
+    tags["hostname"] = settings.get("hostname") or HOSTNAME
     tags.update(settings["tags"])
     result += name + "{"
     result += ", ".join(["{}=\"{}\"".format(k, tags[k]) for k in tags ])
@@ -32,6 +33,7 @@ class Metrics():
         self.disk_provider = DiskMetricsProvider(settings)
         logging.info("Loading CasparCG metrics provider")
         self.caspar_provider = CasparMetricsProvider(settings)
+        self.network_metrics = NetworkMetricsProvider(settings)
 
         self.mem = None
         self.swp = None
@@ -73,6 +75,12 @@ class Metrics():
             result += render_metric("disk_bytes_total", disk["total"] , **tags)
             result += render_metric("disk_bytes_free", disk["free"], **tags)
             result += render_metric("disk_usage", disk["usage"], **tags)
+
+        # Network
+
+        for interface in self.network_metrics():
+            result += render_metric("network_sent_bytes_total", interface["sent"], interface=interface["iface"] )
+            result += render_metric("network_recv_bytes_total", interface["recv"], interface=interface["iface"] )
 
         #
         # NVIDIA GPU

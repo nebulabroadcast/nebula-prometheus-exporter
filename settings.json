@@ -1,3 +1,4 @@
 {
-    "tags" : {"site_name" : "nebula"}
+    "hostname" : "pomelo.immstudios.org",
+    "tags" : {"site_name" : "streaming"}
 }
